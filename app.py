@@ -1,4 +1,6 @@
-from concurrent.futures import process
+import gradio as gr
+from gradio_client import Client, handle_file
+
 import os
 import shutil
 from huggingface_hub import snapshot_download
@@ -9,15 +11,13 @@ from pydub import AudioSegment
 from PIL import Image
 import ffmpeg
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-from scripts.inference import inference_process
 
-#from /content/drive/MyDrive/Project_584/scripts/inference.py 
 import argparse
 import uuid
 
-is_shared_ui = True 
 
-hallo_dir = snapshot_download(repo_id="fudan-generative-ai/hallo", local_dir="pretrained_models")
+
+#hallo_dir = snapshot_download(repo_id="fudan-generative-ai/hallo", local_dir="pretrained_models")
 
 AUDIO_MAX_DURATION = 40000
 
@@ -126,6 +126,23 @@ def change_video_codec(input_file, output_file, codec='libx264', audio_codec='aa
         print(f'Error occurred: {e.stderr.decode()}')
 
 
+
+def get_talk(image_in, speech):
+    client = Client("fffiloni/dreamtalk")
+    try:
+        result = client.predict(
+            audio_input=handle_file(speech),
+            image_path=handle_file(image_in),
+            emotional_style="M030_front_neutral_level1_001.mat",
+            api_name="/infer"
+        )
+        print(result)  # Debugging line
+        return result['video']
+    except Exception as e:
+        print(f"Error in get_talk: {e}")
+        raise gr.Error('An error occurred while loading DreamTalk: Image may not contain any face')
+
+
 #######################################################
 # Gradio APIs for optional image and voice generation #
 #######################################################
@@ -198,54 +215,20 @@ def get_whisperspeech(prompt_audio_whisperspeech, audio_to_clone):
 # TALKING PORTRAIT GEN #
 ########################
 
-def run_hallo(source_image, driving_audio, progress=gr.Progress(track_tqdm=True)):
 
-    unique_id = uuid.uuid4()
-    
-    args = argparse.Namespace(
-        config = 'configs/inference/default.yaml',
-        source_image = source_image,
-        driving_audio = driving_audio,
-        output = f'output-{unique_id}.mp4',
-        pose_weight = 1.0,
-        face_weight = 1.0,
-        lip_weight = 1.0,
-        face_expand_ratio = 1.2,
-        checkpoint = None
-    )
-    
-    inference_process(args)
-    return f'output-{unique_id}.mp4' 
 
-def generate_talking_portrait(portrait, voice, progress=gr.Progress(track_tqdm=True)):
+def pipe(portrait, voice):
+    try:
+        video = get_talk(portrait, voice)
+        print(f"Generated video: {video}")  # Debugging line
+        return video
+    except Exception as e:
+        print(f"Error in pipe: {e}")
+        raise gr.Error('An error occurred while generating the talking portrait.')
 
-    if portrait is None: 
-        raise gr.Error("Please provide a portrait to animate.")
+ 
     
-    if voice is None:
-        raise gr.Error("Please provide audio (4 seconds max).")
-    
-    if is_shared_ui :
-        # Trim audio to AUDIO_MAX_DURATION for better shared experience with community
-        input_file = voice
-        unique_id = uuid.uuid4()
-        trimmed_output_file = f"-{unique_id}.wav"
-        trimmed_output_file = trim_audio(input_file, trimmed_output_file, AUDIO_MAX_DURATION)
-        voice = trimmed_output_file
 
-    # Add 1 second of silence at the end to avoid last word being cut by hallo
-    ready_audio = add_silence_to_wav(voice)
-    print(f"1 second of silence added to {voice}")
-
-    # Call hallo 
-    talking_portrait_vid = run_hallo(portrait, ready_audio)
-
-    # Convert video to readable format
-    
-    final_output_file = f"converted_{talking_portrait_vid}"
-    change_video_codec(talking_portrait_vid, final_output_file)
-    
-    return final_output_file
 
 
 css = '''
@@ -338,7 +321,7 @@ with gr.Blocks(css=css) as demo:
         gr.Markdown("""
         # CPS - 584 Deep Learning Project by Vignesh Yanamalamanda and Srija Tatineni
         
-        This can be achieved  with the help of several open-source model: Stable Diffusiion XL Lightning | Parler TextToSpeec | WhisperSpeech | Hallo
+        This can be achieved  with the help of several open-source model: Stable Diffusiion XL Lightning | Parler TextToSpeec | WhisperSpeech | SadTalker/DreamTalk
         
         
         Thanks to Professor Mehdi For Inspiring Us to be creative while learning. and FYI. 4-5 seconds of audio will take ~5 minutes per inference, please be patient.
@@ -414,7 +397,7 @@ with gr.Blocks(css=css) as demo:
                         elem_id="video-block"
                     )
                     
-                    submit_btn = gr.Button("Go talking Portrait !", elem_id="main-submit")
+                    submit_btn = gr.Button("See The Magic !", elem_id="main-submit")
         
         with gr.Row(elem_id="pro-tips"):
             gr.Markdown("""
@@ -477,10 +460,12 @@ with gr.Blocks(css=css) as demo:
     )
 
     submit_btn.click(
-        fn = generate_talking_portrait,
-        inputs = [portrait, voice],
-        outputs = [result],
-        show_api = False
+    fn=pipe,
+    inputs=[portrait, voice],
+    outputs=[result],
+    show_api=False
+
+
     )
         
 
